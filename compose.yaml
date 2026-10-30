@@ -1,10 +1,53 @@
 services:
+  db:
+    image: postgres:16.4-alpine3.20
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-policies}
+      POSTGRES_USER: ${POSTGRES_USER:-policies}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-only-change-me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-policies} -d ${POSTGRES_DB:-policies}",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  migrate:
+    image: flyway/flyway:11.10.0-alpine
+    command: migrate
+    environment:
+      FLYWAY_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-policies}
+      FLYWAY_USER: ${POSTGRES_USER:-policies}
+      FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:-local-only-change-me}
+      FLYWAY_CONNECT_RETRIES: 20
+    volumes:
+      - ./src/main/resources/db/migration:/flyway/sql:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
   api:
     build:
       context: .
       dockerfile: Dockerfile
+    init: true
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-policies}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-policies}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-local-only-change-me}
+      SPRING_FLYWAY_ENABLED: "false"
     expose:
       - "8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   gateway:
@@ -12,6 +55,7 @@ services:
     depends_on:
       api:
         condition: service_healthy
+        restart: true
     ports:
       - "${GATEWAY_PORT:-8080}:8080"
     volumes:
@@ -23,3 +67,6 @@ services:
       start_period: 5s
       retries: 3
     restart: unless-stopped
+
+volumes:
+  postgres_data:

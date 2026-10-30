@@ -16,6 +16,8 @@ jobs:
           cache: maven
       - name: Verify application
         run: ./mvnw -B -ntp verify
+      - name: Verify PostgreSQL integration
+        run: ./mvnw -B -ntp -Pintegration verify
       - name: Validate Compose configuration
         run: docker compose config --quiet
       - name: Build Docker images

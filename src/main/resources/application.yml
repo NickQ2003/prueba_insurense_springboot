@@ -1,6 +1,20 @@
 spring:
   application:
     name: policies-api
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/policies}
+    username: ${SPRING_DATASOURCE_USERNAME:policies}
+    password: ${SPRING_DATASOURCE_PASSWORD:local-only-change-me}
+    hikari:
+      maximum-pool-size: 5
+      connection-timeout: 3000
+      validation-timeout: 2000
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: ${SPRING_FLYWAY_ENABLED:true}
 
 server:
   port: 8080
