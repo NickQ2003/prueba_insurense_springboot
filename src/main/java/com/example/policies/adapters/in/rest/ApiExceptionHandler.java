@@ -1,6 +1,7 @@
 package com.example.policies.adapters.in.rest;
 
 import com.example.policies.adapters.in.rest.dto.ApiErrorResponse;
+import com.example.policies.application.error.IdempotencyConflictException;
 import com.example.policies.application.error.ResourceNotFoundException;
 import com.example.policies.domain.error.PolicyRuleViolationException;
 import jakarta.validation.ConstraintViolationException;
@@ -14,6 +15,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
@@ -61,6 +63,23 @@ public class ApiExceptionHandler {
   ResponseEntity<ApiErrorResponse> conflict() {
     return error(
         HttpStatus.CONFLICT, "data_conflict", "The request conflicts with existing data", Map.of());
+  }
+
+  @ExceptionHandler(IdempotencyConflictException.class)
+  ResponseEntity<ApiErrorResponse> idempotencyConflict(IdempotencyConflictException exception) {
+    return error(HttpStatus.CONFLICT, "idempotency_conflict", exception.getMessage(), Map.of());
+  }
+
+  @ExceptionHandler(MissingRequestHeaderException.class)
+  ResponseEntity<ApiErrorResponse> missingHeader() {
+    return error(
+        HttpStatus.BAD_REQUEST, "missing_header", "A required request header is missing", Map.of());
+  }
+
+  @ExceptionHandler(IllegalArgumentException.class)
+  ResponseEntity<ApiErrorResponse> invalidArgument(IllegalArgumentException exception) {
+    return error(
+        HttpStatus.UNPROCESSABLE_ENTITY, "invalid_argument", exception.getMessage(), Map.of());
   }
 
   @ExceptionHandler(HttpMessageNotReadableException.class)

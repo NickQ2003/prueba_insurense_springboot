@@ -33,7 +33,7 @@ curl -H 'x-api-key: 123456' http://localhost:8080/api/v1/parties
 curl -H 'x-api-key: 123456' 'http://localhost:8080/api/v1/policies?limit=50&offset=0'
 ```
 
-`POST /api/v1/parties` crea una parte sintética. Por ahora las pólizas se pueden consultar; su emisión se incorporará en la siguiente fase.
+`POST /api/v1/parties` crea una parte sintética. `POST /api/v1/policies` registra una solicitud de emisión y requiere `Idempotency-Key`; responde `202 Accepted` con una operación consultable en `/api/v1/operations/{id}`. Ese `202` confirma la persistencia de la solicitud, no la emisión contractual en el CORE.
 
 ## Desarrollo y pruebas
 

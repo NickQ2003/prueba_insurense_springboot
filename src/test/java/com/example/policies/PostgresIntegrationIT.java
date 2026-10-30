@@ -1,8 +1,14 @@
 package com.example.policies;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.example.policies.adapters.out.persistence.JdbcDurableOperationRepository;
+import com.example.policies.application.error.IdempotencyConflictException;
+import com.example.policies.application.port.out.DurableOperationRepository;
+import com.example.policies.application.usecase.OperationDraft;
+import com.example.policies.application.usecase.OperationSnapshot;
 import com.example.policies.domain.model.PartyType;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
@@ -16,7 +22,9 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
@@ -34,6 +42,8 @@ class PostgresIntegrationIT {
 
   private static Flyway flyway;
   private static JdbcTemplate jdbcTemplate;
+  private static DurableOperationRepository operationRepository;
+  private static TransactionTemplate transactionTemplate;
 
   @BeforeAll
   static void migrateSchema() {
@@ -43,6 +53,8 @@ class PostgresIntegrationIT {
     flyway = Flyway.configure().dataSource(dataSource).load();
     flyway.migrate();
     jdbcTemplate = new JdbcTemplate(dataSource);
+    operationRepository = new JdbcDurableOperationRepository(jdbcTemplate);
+    transactionTemplate = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
   }
 
   @Test
@@ -99,6 +111,50 @@ class PostgresIntegrationIT {
   }
 
   @Test
+  void atomicallyStoresOperationOutboxAndAuditAndReturnsExistingReplay() {
+    OperationDraft draft = operationDraft("ATOMIC-" + UUID.randomUUID(), "a".repeat(64));
+    OperationSnapshot first =
+        transactionTemplate.execute(status -> operationRepository.createIdempotently(draft));
+    assertNotNull(first);
+
+    OperationSnapshot replay =
+        transactionTemplate.execute(
+            status ->
+                operationRepository.createIdempotently(
+                    operationDraft(draft.idempotencyKey(), draft.requestHash())));
+    assertNotNull(replay);
+    assertEquals(first.id(), replay.id());
+    assertEquals(1, countRows("operations", first.id()));
+    assertEquals(1, countRows("outbox_events", first.id()));
+    assertEquals(1, countRows("audit_events", first.id()));
+
+    assertThrows(
+        IdempotencyConflictException.class,
+        () ->
+            transactionTemplate.execute(
+                status ->
+                    operationRepository.createIdempotently(
+                        operationDraft(draft.idempotencyKey(), "b".repeat(64)))));
+  }
+
+  @Test
+  void rollsBackOperationOutboxAndAuditTogether() {
+    OperationDraft draft = operationDraft("ROLLBACK-" + UUID.randomUUID(), "c".repeat(64));
+
+    assertThrows(
+        ForcedRollback.class,
+        () ->
+            transactionTemplate.execute(
+                status -> {
+                  operationRepository.createIdempotently(draft);
+                  throw new ForcedRollback();
+                }));
+    assertEquals(0, countRows("operations", draft.id()));
+    assertEquals(0, countRows("outbox_events", draft.id()));
+    assertEquals(0, countRows("audit_events", draft.id()));
+  }
+
+  @Test
   void rejectsNegativeIpcRatesAtDatabaseBoundary() {
     assertThrows(
         DataIntegrityViolationException.class,
@@ -138,4 +194,33 @@ class PostgresIntegrationIT {
         Timestamp.from(Instant.now()),
         Timestamp.from(Instant.now()));
   }
+
+  private OperationDraft operationDraft(String idempotencyKey, String requestHash) {
+    Instant now = Instant.now();
+    return new OperationDraft(
+        UUID.randomUUID(),
+        "integration-test",
+        "ISSUE_POLICY",
+        idempotencyKey,
+        requestHash,
+        "{\"policy_type\":\"INDIVIDUAL\"}",
+        UUID.randomUUID(),
+        "test-operator",
+        now);
+  }
+
+  private int countRows(String table, UUID operationId) {
+    String column =
+        table.equals("operations")
+            ? "id"
+            : (table.equals("outbox_events") ? "operation_id" : "entity_id");
+    Integer count =
+        jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM " + table + " WHERE " + column + " = ?",
+            Integer.class,
+            operationId);
+    return count == null ? 0 : count;
+  }
+
+  private static class ForcedRollback extends RuntimeException {}
 }

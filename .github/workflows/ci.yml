@@ -28,11 +28,25 @@ jobs:
         run: |
           curl --fail http://localhost:8080/health/live
           curl --fail http://localhost:8080/health/ready
-          curl --fail -H 'x-api-key: 123456' -H 'Content-Type: application/json' \
-            -d '{"party_type":"PERSON","display_name":"CI Demo","document_reference":"SYNTHETIC-CI-001"}' \
-            http://localhost:8080/api/v1/parties
-          curl --fail -H 'x-api-key: 123456' \
-            'http://localhost:8080/api/v1/parties?search=SYNTHETIC-CI-001' | jq -e '.total == 1'
+          holder_id=$(curl --fail --silent --show-error -H 'x-api-key: 123456' \
+            -H 'Content-Type: application/json' \
+            -d '{"party_type":"PERSON","display_name":"CI Tenant","document_reference":"SYNTHETIC-CI-TENANT-001"}' \
+            http://localhost:8080/api/v1/parties | jq -r '.id')
+          landlord_id=$(curl --fail --silent --show-error -H 'x-api-key: 123456' \
+            -H 'Content-Type: application/json' \
+            -d '{"party_type":"PERSON","display_name":"CI Landlord","document_reference":"SYNTHETIC-CI-LANDLORD-001"}' \
+            http://localhost:8080/api/v1/parties | jq -r '.id')
+          issue_body=$(jq -nc --arg holder "$holder_id" --arg landlord "$landlord_id" --arg starts_on "$(date -u +%F)" \
+            '{policy_type:"INDIVIDUAL",holder_party_id:$holder,starts_on:$starts_on,duration_months:12,risks:[{property_address:"Synthetic CI property",tenant_party_id:$holder,landlord_party_id:$landlord,monthly_rent:"1500000.00"}]}')
+          operation_id=$(curl --fail --silent --show-error -H 'x-api-key: 123456' \
+            -H 'Idempotency-Key: PT-CI-ISSUE-001' -H 'Content-Type: application/json' \
+            -d "$issue_body" http://localhost:8080/api/v1/policies | jq -r '.id')
+          replay_id=$(curl --fail --silent --show-error -H 'x-api-key: 123456' \
+            -H 'Idempotency-Key: PT-CI-ISSUE-001' -H 'Content-Type: application/json' \
+            -d "$issue_body" http://localhost:8080/api/v1/policies | jq -r '.id')
+          test "$operation_id" = "$replay_id"
+          curl --fail --silent --show-error -H 'x-api-key: 123456' \
+            "http://localhost:8080/api/v1/operations/$operation_id" | jq -e '.status == "PENDING"'
           curl --fail http://localhost:8080/v3/api-docs | jq -e '.info.title == "Rental Policy API"'
       - name: Stop Compose services
         if: always()
