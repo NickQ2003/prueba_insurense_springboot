@@ -43,6 +43,10 @@ services:
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-policies}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-local-only-change-me}
       SPRING_FLYWAY_ENABLED: "false"
+      API_KEY: ${API_KEY:-123456}
+      API_READ_TOKEN: ${API_READ_TOKEN:-demo-read-token}
+      API_OPERATOR_TOKEN: ${API_OPERATOR_TOKEN:-demo-operator-token}
+      API_REVIEWER_TOKEN: ${API_REVIEWER_TOKEN:-demo-reviewer-token}
     expose:
       - "8080"
     depends_on:

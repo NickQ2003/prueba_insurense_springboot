@@ -1,6 +1,9 @@
 spring:
   application:
     name: policies-api
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/policies}
     username: ${SPRING_DATASOURCE_USERNAME:policies}
@@ -29,3 +32,14 @@ management:
       probes:
         enabled: true
       show-details: never
+
+demo:
+  security:
+    api-key: ${API_KEY:123456}
+    read-token: ${API_READ_TOKEN:demo-read-token}
+    operator-token: ${API_OPERATOR_TOKEN:demo-operator-token}
+    reviewer-token: ${API_REVIEWER_TOKEN:demo-reviewer-token}
+
+springdoc:
+  swagger-ui:
+    path: /docs

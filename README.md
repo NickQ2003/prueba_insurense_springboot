@@ -24,6 +24,17 @@ curl --fail http://localhost:8080/health/ready
 
 Detén los servicios con `docker compose down`. Los datos de PostgreSQL permanecen en el volumen `postgres_data`.
 
+## API síncrona
+
+Swagger UI está disponible en `http://localhost:8080/docs` y OpenAPI en `/v3/api-docs`. Las rutas de negocio requieren `x-api-key`; el valor local y los tokens Bearer de los roles `read`, `operator` y `reviewer` están en `.env.example`.
+
+```bash
+curl -H 'x-api-key: 123456' http://localhost:8080/api/v1/parties
+curl -H 'x-api-key: 123456' 'http://localhost:8080/api/v1/policies?limit=50&offset=0'
+```
+
+`POST /api/v1/parties` crea una parte sintética. Por ahora las pólizas se pueden consultar; su emisión se incorporará en la siguiente fase.
+
 ## Desarrollo y pruebas
 
 ```bash

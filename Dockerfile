@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
 
 WORKDIR /workspace
@@ -5,10 +6,10 @@ ENV MAVEN_CONFIG=""
 
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
-RUN chmod +x mvnw && ./mvnw -B -ntp dependency:go-offline
-
 COPY src/ src/
-RUN ./mvnw -B -ntp verify \
+RUN --mount=type=cache,target=/root/.m2 \
+    chmod +x mvnw \
+    && ./mvnw -B -ntp verify \
     && cp target/policies-service-0.1.0-SNAPSHOT.jar /workspace/app.jar
 
 FROM eclipse-temurin:21.0.7_6-jre-alpine AS runtime

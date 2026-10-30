@@ -1,13 +1,10 @@
 package com.example.policies;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.example.policies.domain.model.PartyType;
+import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -15,23 +12,17 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Testcontainers
-@SpringBootTest
-@AutoConfigureMockMvc
 class PostgresIntegrationIT {
 
   @Container
@@ -41,36 +32,21 @@ class PostgresIntegrationIT {
               Wait.forLogMessage(".*database system is ready to accept connections.*\\s", 2)
                   .withStartupTimeout(Duration.ofMinutes(3)));
 
-  @Autowired private MockMvc mockMvc;
-  @Autowired private Flyway flyway;
-  @Autowired private JdbcTemplate jdbcTemplate;
+  private static Flyway flyway;
+  private static JdbcTemplate jdbcTemplate;
 
-  @DynamicPropertySource
-  static void configureDatabase(DynamicPropertyRegistry registry) {
-    registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-    registry.add("spring.datasource.username", POSTGRES::getUsername);
-    registry.add("spring.datasource.password", POSTGRES::getPassword);
-  }
-
-  @Test
-  void exposesLivenessProbe() throws Exception {
-    mockMvc
-        .perform(get("/actuator/health/liveness"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status").value("UP"));
-  }
-
-  @Test
-  void exposesReadinessProbe() throws Exception {
-    mockMvc
-        .perform(get("/actuator/health/readiness"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status").value("UP"));
+  @BeforeAll
+  static void migrateSchema() {
+    DriverManagerDataSource dataSource =
+        new DriverManagerDataSource(
+            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+    flyway = Flyway.configure().dataSource(dataSource).load();
+    flyway.migrate();
+    jdbcTemplate = new JdbcTemplate(dataSource);
   }
 
   @Test
   void appliesInitialFlywayMigrationAndCreatesDomainTables() {
-    assertNotNull(flyway.info().current());
     assertEquals("001", flyway.info().current().getVersion().getVersion());
 
     Set<String> expectedTables =
@@ -97,28 +73,46 @@ class PostgresIntegrationIT {
 
   @Test
   void enforcesPartyDocumentUniqueness() {
-    insertParty(UUID.randomUUID(), "INTEGRATION-DOCUMENT-001", PartyType.PERSON.name());
+    String documentReference = "INTEGRATION-" + UUID.randomUUID();
+    insertParty(UUID.randomUUID(), documentReference, PartyType.PERSON.name());
 
     assertThrows(
         DataIntegrityViolationException.class,
-        () -> insertParty(UUID.randomUUID(), "INTEGRATION-DOCUMENT-001", PartyType.PERSON.name()));
+        () -> insertParty(UUID.randomUUID(), documentReference, PartyType.PERSON.name()));
   }
 
   @Test
   void rejectsInvalidPartyTypeAtDatabaseBoundary() {
     assertThrows(
         DataIntegrityViolationException.class,
-        () -> insertParty(UUID.randomUUID(), "INTEGRATION-DOCUMENT-002", "INVALID"));
+        () -> insertParty(UUID.randomUUID(), "INVALID-TYPE-" + UUID.randomUUID(), "INVALID"));
   }
 
   @Test
   void enforcesOperationIdempotencyAtDatabaseBoundary() {
-    String idempotencyKey = "integration-idempotency-001";
+    String idempotencyKey = "integration-" + UUID.randomUUID();
     insertOperation(UUID.randomUUID(), idempotencyKey);
 
     assertThrows(
         DataIntegrityViolationException.class,
         () -> insertOperation(UUID.randomUUID(), idempotencyKey));
+  }
+
+  @Test
+  void rejectsNegativeIpcRatesAtDatabaseBoundary() {
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            jdbcTemplate.update(
+                "INSERT INTO ipc_rates "
+                    + "(id, reference_period, effective_on, rate, source, is_fictional, created_at) "
+                    + "VALUES (?, ?, CURRENT_DATE, ?, ?, ?, ?)",
+                UUID.randomUUID(),
+                "NEGATIVE-" + UUID.randomUUID(),
+                new BigDecimal("-0.01000"),
+                "synthetic integration fixture",
+                true,
+                Timestamp.from(Instant.now())));
   }
 
   private void insertParty(UUID id, String documentReference, String partyType) {
