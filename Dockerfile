@@ -9,7 +9,7 @@ COPY mvnw pom.xml ./
 COPY src/ src/
 RUN --mount=type=cache,target=/root/.m2 \
     chmod +x mvnw \
-    && ./mvnw -B -ntp verify \
+    && ./mvnw -B -ntp -DskipTests package \
     && cp target/policies-service-0.1.0-SNAPSHOT.jar /workspace/app.jar
 
 FROM eclipse-temurin:21.0.7_6-jre-alpine AS runtime

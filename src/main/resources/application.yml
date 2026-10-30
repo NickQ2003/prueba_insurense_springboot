@@ -34,6 +34,8 @@ management:
       show-details: never
 
 demo:
+  controls-enabled: ${DEMO_CONTROLS_ENABLED:true}
+  core-outcome: ${DEMO_CORE_OUTCOME:CONFIRM}
   security:
     api-key: ${API_KEY:123456}
     read-token: ${API_READ_TOKEN:demo-read-token}
@@ -43,3 +45,7 @@ demo:
 springdoc:
   swagger-ui:
     path: /docs
+
+core:
+  base-url: ${CORE_BASE_URL:http://localhost:8081}
+  timeout-seconds: ${CORE_TIMEOUT_SECONDS:2}

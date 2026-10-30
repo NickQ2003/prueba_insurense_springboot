@@ -34,6 +34,7 @@ services:
     restart: "no"
 
   api:
+    image: policies-service:0.1.0
     build:
       context: .
       dockerfile: Dockerfile
@@ -47,6 +48,10 @@ services:
       API_READ_TOKEN: ${API_READ_TOKEN:-demo-read-token}
       API_OPERATOR_TOKEN: ${API_OPERATOR_TOKEN:-demo-operator-token}
       API_REVIEWER_TOKEN: ${API_REVIEWER_TOKEN:-demo-reviewer-token}
+      CORE_BASE_URL: http://core-mock:8081
+      CORE_TIMEOUT_SECONDS: ${CORE_TIMEOUT_SECONDS:-2}
+      DEMO_CONTROLS_ENABLED: ${DEMO_CONTROLS_ENABLED:-true}
+      DEMO_CORE_OUTCOME: ${DEMO_CORE_OUTCOME:-CONFIRM}
     expose:
       - "8080"
     depends_on:
@@ -54,10 +59,30 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  core-mock:
+    image: policies-service:0.1.0
+    command: ["--process-role=core-mock"]
+    init: true
+    environment:
+      API_KEY: ${API_KEY:-123456}
+      DEMO_CONTROLS_ENABLED: ${DEMO_CONTROLS_ENABLED:-true}
+    expose:
+      - "8081"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8081/actuator/health/liveness"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    restart: unless-stopped
+
   gateway:
     image: nginx:1.27.4-alpine
     depends_on:
       api:
+        condition: service_healthy
+        restart: true
+      core-mock:
         condition: service_healthy
         restart: true
     ports:

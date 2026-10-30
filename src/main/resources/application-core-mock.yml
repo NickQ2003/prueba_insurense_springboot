@@ -1,0 +1,12 @@
+spring:
+  application:
+    name: core-mock
+
+server:
+  port: 8081
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
