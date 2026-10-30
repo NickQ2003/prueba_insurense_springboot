@@ -18,6 +18,15 @@ spring:
       ddl-auto: validate
   flyway:
     enabled: ${SPRING_FLYWAY_ENABLED:true}
+  rabbitmq:
+    host: ${SPRING_RABBITMQ_HOST:localhost}
+    port: ${SPRING_RABBITMQ_PORT:5672}
+    username: ${SPRING_RABBITMQ_USERNAME:policies}
+    password: ${SPRING_RABBITMQ_PASSWORD:local-only-change-me}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
 
 server:
   port: 8080
@@ -49,3 +58,10 @@ springdoc:
 core:
   base-url: ${CORE_BASE_URL:http://localhost:8081}
   timeout-seconds: ${CORE_TIMEOUT_SECONDS:2}
+
+outbox-relay:
+  poll-interval-ms: ${OUTBOX_RELAY_POLL_INTERVAL_MS:500}
+  batch-size: ${OUTBOX_RELAY_BATCH_SIZE:20}
+
+worker:
+  max-core-concurrency: ${MAX_CORE_CONCURRENCY:2}

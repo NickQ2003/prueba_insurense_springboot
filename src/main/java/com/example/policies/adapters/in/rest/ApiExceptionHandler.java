@@ -2,6 +2,7 @@ package com.example.policies.adapters.in.rest;
 
 import com.example.policies.adapters.in.rest.dto.ApiErrorResponse;
 import com.example.policies.application.error.IdempotencyConflictException;
+import com.example.policies.application.error.OperationConflictException;
 import com.example.policies.application.error.ResourceNotFoundException;
 import com.example.policies.domain.error.PolicyRuleViolationException;
 import jakarta.validation.ConstraintViolationException;
@@ -68,6 +69,11 @@ public class ApiExceptionHandler {
   @ExceptionHandler(IdempotencyConflictException.class)
   ResponseEntity<ApiErrorResponse> idempotencyConflict(IdempotencyConflictException exception) {
     return error(HttpStatus.CONFLICT, "idempotency_conflict", exception.getMessage(), Map.of());
+  }
+
+  @ExceptionHandler(OperationConflictException.class)
+  ResponseEntity<ApiErrorResponse> operationConflict(OperationConflictException exception) {
+    return error(HttpStatus.CONFLICT, "operation_conflict", exception.getMessage(), Map.of());
   }
 
   @ExceptionHandler(MissingRequestHeaderException.class)

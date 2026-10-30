@@ -1,6 +1,8 @@
 package com.example.policies.adapters.out.persistence;
 
 import com.example.policies.application.error.IdempotencyConflictException;
+import com.example.policies.application.error.OperationConflictException;
+import com.example.policies.application.error.ResourceNotFoundException;
 import com.example.policies.application.port.out.DurableOperationRepository;
 import com.example.policies.application.usecase.OperationDraft;
 import com.example.policies.application.usecase.OperationSnapshot;
@@ -12,6 +14,7 @@ import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 @Repository
 public class JdbcDurableOperationRepository implements DurableOperationRepository {
@@ -35,6 +38,7 @@ public class JdbcDurableOperationRepository implements DurableOperationRepositor
   }
 
   @Override
+  @Transactional
   public OperationSnapshot createIdempotently(OperationDraft draft) {
     List<OperationSnapshot> inserted =
         jdbcTemplate.query(
@@ -91,6 +95,44 @@ public class JdbcDurableOperationRepository implements DurableOperationRepositor
             id)
         .stream()
         .findFirst();
+  }
+
+  @Override
+  @Transactional
+  public OperationSnapshot requestReconciliation(UUID id, String actor) {
+    int updated =
+        jdbcTemplate.update(
+            "UPDATE operations SET status = 'RECONCILING', next_attempt_at = CURRENT_TIMESTAMP, "
+                + "updated_at = CURRENT_TIMESTAMP WHERE id = ? AND (status = 'NEEDS_REVIEW' "
+                + "OR (status = 'RECONCILING' AND (lease_until IS NULL OR lease_until < CURRENT_TIMESTAMP)))",
+            id);
+    if (updated != 1) {
+      throw new OperationConflictException(
+          "Operation is already processing or cannot be reconciled");
+    }
+
+    String payload = "{\"operation_id\":\"" + id + "\",\"operation_type\":\"RECONCILE\"}";
+    jdbcTemplate.update(
+        "INSERT INTO outbox_events "
+            + "(id, operation_id, event_type, payload, available_at, created_at) "
+            + "VALUES (?, ?, 'CORE_RECONCILIATION_REQUESTED', ?::jsonb, "
+            + "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+            + "ON CONFLICT (operation_id, event_type) DO UPDATE SET "
+            + "payload = EXCLUDED.payload, available_at = EXCLUDED.available_at, "
+            + "lease_owner = NULL, lease_until = NULL, published_at = NULL",
+        UUID.randomUUID(),
+        id,
+        payload);
+    jdbcTemplate.update(
+        "INSERT INTO audit_events "
+            + "(id, actor, action, entity_type, entity_id, details, correlation_id, created_at) "
+            + "SELECT ?, ?, 'RECONCILIATION_REQUESTED', 'OPERATION', id, "
+            + "jsonb_build_object('operation_id', id), correlation_id, CURRENT_TIMESTAMP "
+            + "FROM operations WHERE id = ?",
+        UUID.randomUUID(),
+        actor,
+        id);
+    return findById(id).orElseThrow(() -> new ResourceNotFoundException("Operation"));
   }
 
   private void insertOutboxEvent(OperationDraft draft) {

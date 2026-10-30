@@ -1,5 +1,6 @@
 package com.example.policies.application.usecase;
 
+import com.example.policies.application.error.OperationConflictException;
 import com.example.policies.application.error.ResourceNotFoundException;
 import com.example.policies.application.port.out.DurableOperationRepository;
 import com.example.policies.application.port.out.PartyRepository;
@@ -75,6 +76,16 @@ public class OperationService {
     return operationRepository
         .findById(id)
         .orElseThrow(() -> new ResourceNotFoundException("Operation"));
+  }
+
+  @Transactional
+  public OperationSnapshot reconcile(UUID id, String actor) {
+    OperationSnapshot operation = findById(id);
+    if (operation.status() != com.example.policies.domain.model.OperationStatus.NEEDS_REVIEW
+        && operation.status() != com.example.policies.domain.model.OperationStatus.RECONCILING) {
+      throw new OperationConflictException("Operation is not awaiting CORE reconciliation");
+    }
+    return operationRepository.requestReconciliation(id, actor);
   }
 
   private void requireParty(UUID partyId) {

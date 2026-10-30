@@ -195,6 +195,21 @@ class RestApiTest {
         .andExpect(jsonPath("$.error").value("idempotency_conflict"));
   }
 
+  @Test
+  void reviewerCanRequestReconciliationForAnOperation() throws Exception {
+    UUID operationId = UUID.randomUUID();
+    given(operationService.reconcile(operationId, "demo-reviewer"))
+        .willReturn(pendingOperation(operationId));
+
+    mockMvc
+        .perform(
+            post("/api/v1/operations/{operationId}/reconcile", operationId)
+                .header("x-api-key", "123456")
+                .header("Authorization", "Bearer demo-reviewer-token"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.id").value(operationId.toString()));
+  }
+
   private static OperationSnapshot pendingOperation(UUID operationId) {
     Instant now = Instant.parse("2026-10-30T00:00:00Z");
     return new OperationSnapshot(

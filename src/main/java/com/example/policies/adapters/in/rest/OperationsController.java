@@ -58,6 +58,14 @@ public class OperationsController {
     return OperationResponse.from(operationService.findById(operationId));
   }
 
+  @PostMapping("/operations/{operationId}/reconcile")
+  @PreAuthorize("hasAnyRole('OPERATOR', 'REVIEWER')")
+  public OperationResponse reconcile(
+      @PathVariable UUID operationId, Authentication authentication) {
+    return OperationResponse.from(
+        operationService.reconcile(operationId, authentication.getName()));
+  }
+
   private IssuePolicyCommand toCommand(IssuePolicyRequest request) {
     return new IssuePolicyCommand(
         request.policyType(),

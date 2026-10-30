@@ -1,20 +1,35 @@
 package com.example.policies;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.example.policies.adapters.out.persistence.JdbcDurableOperationRepository;
+import com.example.policies.adapters.out.persistence.JdbcOperationProcessingRepository;
+import com.example.policies.adapters.out.persistence.JdbcOutboxRepository;
 import com.example.policies.application.error.IdempotencyConflictException;
+import com.example.policies.application.model.CoreOperationResult;
+import com.example.policies.application.model.CoreOperationStatus;
 import com.example.policies.application.port.out.DurableOperationRepository;
+import com.example.policies.application.port.out.OperationProcessingRepository;
+import com.example.policies.application.port.out.OutboxRepository;
+import com.example.policies.application.usecase.IssuePolicyCommand;
+import com.example.policies.application.usecase.IssueRiskCommand;
 import com.example.policies.application.usecase.OperationDraft;
 import com.example.policies.application.usecase.OperationSnapshot;
+import com.example.policies.application.usecase.OperationWork;
+import com.example.policies.application.usecase.OutboxEvent;
+import com.example.policies.domain.model.OperationStatus;
 import com.example.policies.domain.model.PartyType;
+import com.example.policies.domain.model.PolicyType;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
@@ -43,6 +58,7 @@ class PostgresIntegrationIT {
   private static Flyway flyway;
   private static JdbcTemplate jdbcTemplate;
   private static DurableOperationRepository operationRepository;
+  private static OperationProcessingRepository operationProcessingRepository;
   private static TransactionTemplate transactionTemplate;
 
   @BeforeAll
@@ -54,6 +70,7 @@ class PostgresIntegrationIT {
     flyway.migrate();
     jdbcTemplate = new JdbcTemplate(dataSource);
     operationRepository = new JdbcDurableOperationRepository(jdbcTemplate);
+    operationProcessingRepository = new JdbcOperationProcessingRepository(jdbcTemplate);
     transactionTemplate = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
   }
 
@@ -152,6 +169,116 @@ class PostgresIntegrationIT {
     assertEquals(0, countRows("operations", draft.id()));
     assertEquals(0, countRows("outbox_events", draft.id()));
     assertEquals(0, countRows("audit_events", draft.id()));
+  }
+
+  @Test
+  void claimsOutboxEventWithLeaseAndMarksItPublishedAfterBrokerConfirm() {
+    jdbcTemplate.update(
+        "UPDATE outbox_events SET published_at = CURRENT_TIMESTAMP WHERE published_at IS NULL");
+    UUID operationId = UUID.randomUUID();
+    insertOperation(operationId, "OUTBOX-" + UUID.randomUUID());
+    UUID eventId = UUID.randomUUID();
+    jdbcTemplate.update(
+        "INSERT INTO outbox_events "
+            + "(id, operation_id, event_type, payload, available_at, created_at) "
+            + "VALUES (?, ?, 'POLICY_ISSUE_REQUESTED', '{}'::jsonb, ?, ?)",
+        eventId,
+        operationId,
+        Timestamp.from(Instant.now()),
+        Timestamp.from(Instant.now()));
+    OutboxRepository outboxRepository = new JdbcOutboxRepository(jdbcTemplate);
+
+    List<OutboxEvent> claimed = outboxRepository.claimReadyBatch(10, "relay-test");
+
+    assertEquals(1, claimed.size());
+    assertEquals(eventId, claimed.getFirst().id());
+    assertTrue(outboxRepository.markPublished(claimed.getFirst(), "relay-test"));
+    assertFalse(outboxRepository.markPublished(claimed.getFirst(), "relay-test"));
+    assertTrue(outboxRepository.claimReadyBatch(10, "relay-test-2").isEmpty());
+  }
+
+  @Test
+  void manualReconciliationRequeuesQueryWithoutChangingOperationIdentity() {
+    UUID operationId = UUID.randomUUID();
+    String idempotencyKey = "RECONCILE-" + operationId;
+    insertOperation(operationId, idempotencyKey);
+    jdbcTemplate.update("UPDATE operations SET status = 'NEEDS_REVIEW' WHERE id = ?", operationId);
+
+    OperationSnapshot requeued =
+        operationRepository.requestReconciliation(operationId, "integration-reviewer");
+
+    assertEquals(OperationStatus.RECONCILING, requeued.status());
+    assertEquals(1, countRows("operations", operationId));
+    assertEquals(
+        1,
+        jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM outbox_events "
+                + "WHERE operation_id = ? AND event_type = 'CORE_RECONCILIATION_REQUESTED'",
+            Integer.class,
+            operationId));
+  }
+
+  @Test
+  void persistsContractAndSyntheticNotificationOnlyAfterCoreConfirmation() {
+    UUID operationId = UUID.randomUUID();
+    UUID holderId = UUID.randomUUID();
+    UUID landlordId = UUID.randomUUID();
+    insertParty(holderId, "WORKER-HOLDER-" + operationId, PartyType.PERSON.name());
+    insertParty(landlordId, "WORKER-LANDLORD-" + operationId, PartyType.PERSON.name());
+    insertOperation(operationId, "WORKER-ISSUE-" + operationId);
+    String requestHash = "d".repeat(64);
+    jdbcTemplate.update(
+        "UPDATE operations SET request_hash = ? WHERE id = ?", requestHash, operationId);
+    OperationWork operation =
+        transactionTemplate.execute(
+            status ->
+                operationProcessingRepository.claim(operationId, "worker-test").orElseThrow());
+    IssuePolicyCommand request =
+        new IssuePolicyCommand(
+            PolicyType.INDIVIDUAL,
+            holderId,
+            java.time.LocalDate.parse("2026-10-30"),
+            12,
+            List.of(new IssueRiskCommand("Synthetic address", holderId, landlordId, "1500000.00")),
+            "synthetic test policy");
+    CoreOperationResult confirmation =
+        new CoreOperationResult(
+            operationId, requestHash, CoreOperationStatus.CONFIRMED, "CORE-TEST-001", "confirmed");
+
+    transactionTemplate.executeWithoutResult(
+        status ->
+            operationProcessingRepository.completePolicyIssue(operation, request, confirmation));
+
+    UUID policyId =
+        jdbcTemplate.queryForObject(
+            "SELECT policy_id FROM operations WHERE id = ?", UUID.class, operationId);
+    assertNotNull(policyId);
+    assertEquals(
+        "SUCCEEDED",
+        jdbcTemplate.queryForObject(
+            "SELECT status FROM operations WHERE id = ?", String.class, operationId));
+    assertEquals(
+        1,
+        jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM risks WHERE policy_id = ? AND status = 'ACTIVE'",
+            Integer.class,
+            policyId));
+    assertEquals(
+        1,
+        jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM period_risk_values "
+                + "WHERE monthly_rent = 1500000.00 AND premium = 18000000.00 AND currency = 'COP' "
+                + "AND period_id IN (SELECT id FROM policy_periods WHERE policy_id = ?)",
+            Integer.class,
+            policyId));
+    assertEquals(
+        1,
+        jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM notification_deliveries n "
+                + "JOIN outbox_events e ON e.id = n.outbox_event_id "
+                + "WHERE e.operation_id = ? AND n.recipient = 'demo-operator@example.invalid'",
+            Integer.class,
+            operationId));
   }
 
   @Test

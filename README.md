@@ -33,9 +33,9 @@ curl -H 'x-api-key: 123456' http://localhost:8080/api/v1/parties
 curl -H 'x-api-key: 123456' 'http://localhost:8080/api/v1/policies?limit=50&offset=0'
 ```
 
-`POST /api/v1/parties` crea una parte sintética. `POST /api/v1/policies` registra una solicitud de emisión y requiere `Idempotency-Key`; responde `202 Accepted` con una operación consultable en `/api/v1/operations/{id}`. Ese `202` confirma la persistencia de la solicitud, no la emisión contractual en el CORE. El servicio `core-mock` es una simulación local, no una conexión a WebLogic ni al CORE real; `/core-mock/evento` solo registra el tipo de evento de demostración.
+`POST /api/v1/parties` crea una parte sintética. `POST /api/v1/policies` registra una solicitud de emisión y requiere `Idempotency-Key`; responde `202 Accepted` con una operación consultable en `/api/v1/operations/{id}`. Ese `202` confirma la persistencia de la solicitud, no la emisión contractual en el CORE. El outbox relay la publica a RabbitMQ y el worker actualiza la operación tras consultar al CORE mock.
 
-La API dispone del puerto HTTP `CorePort` y el proceso `core-mock` privado en Compose. Puedes simular respuestas cambiando `DEMO_CORE_OUTCOME` a `CONFIRM`, `REJECT`, `UNAVAILABLE`, `TIMEOUT_BEFORE_APPLY`, `TIMEOUT_AFTER_APPLY` o `MISMATCH`; la identidad de operación se conserva para reintentos y consulta.
+El proceso privado `core-mock` es una simulación local, no una conexión a WebLogic ni al CORE real. Puedes simular respuestas cambiando `DEMO_CORE_OUTCOME` a `CONFIRM`, `REJECT`, `UNAVAILABLE`, `TIMEOUT_BEFORE_APPLY`, `TIMEOUT_AFTER_APPLY` o `MISMATCH`; la identidad de operación se conserva para reconciliar el mismo resultado. `/core-mock/evento` solo registra el tipo de evento de demostración.
 
 ## Desarrollo y pruebas
 
@@ -46,4 +46,4 @@ docker compose config --quiet
 docker compose build
 ```
 
-Las pruebas de `verify` cubren reglas y cálculos unitarios; `-Pintegration` ejecuta las pruebas con PostgreSQL real mediante Testcontainers. El proyecto incluye modelos de dominio independientes de Spring, reglas puras para pólizas, cálculo monetario con `BigDecimal`, esquema Flyway y validación Hibernate. Las rutas de negocio, operaciones durables, mensajería y CORE mock se incorporarán por fases según la especificación.
+Las pruebas de `verify` cubren reglas, cálculos, API y el worker; `-Pintegration` ejecuta las pruebas con PostgreSQL real mediante Testcontainers. Ya están implementados la API síncrona, emisión durable e idempotente, outbox/auditoría, relay con publisher confirms, worker, reconciliación básica y CORE mock. Quedan por implementar renovaciones IPC, administración/cancelación de riesgos y pólizas, scheduler, seed, UI estática y la suite E2E aislada final.

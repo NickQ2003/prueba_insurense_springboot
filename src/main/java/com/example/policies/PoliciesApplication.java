@@ -1,6 +1,7 @@
 package com.example.policies;
 
 import com.example.policies.entrypoints.coremock.CoreMockLauncher;
+import com.example.policies.entrypoints.process.ProcessRoleLauncher;
 import java.util.Arrays;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -13,6 +14,12 @@ public class PoliciesApplication {
     if (Arrays.asList(args).contains("--process-role=core-mock")) {
       CoreMockLauncher.run(args);
       return;
+    }
+    for (String role : new String[] {"worker", "outbox-relay"}) {
+      if (Arrays.asList(args).contains("--process-role=" + role)) {
+        ProcessRoleLauncher.run(role, args);
+        return;
+      }
     }
     SpringApplication.run(PoliciesApplication.class, args);
   }

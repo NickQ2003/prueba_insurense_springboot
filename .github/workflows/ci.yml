@@ -22,7 +22,9 @@ jobs:
         run: docker compose config --quiet
       - name: Build Docker images
         run: docker compose build
-      - name: Start Compose and wait for health
+      - name: Start Compose services
+        run: docker compose up -d api worker outbox-relay core-mock gateway rabbitmq db
+      - name: Wait for gateway health
         run: docker compose up -d --wait --wait-timeout 300 gateway
       - name: Smoke check API
         run: |
@@ -45,8 +47,24 @@ jobs:
             -H 'Idempotency-Key: PT-CI-ISSUE-001' -H 'Content-Type: application/json' \
             -d "$issue_body" http://localhost:8080/api/v1/policies | jq -r '.id')
           test "$operation_id" = "$replay_id"
+          for attempt in $(seq 1 180); do
+            status=$(curl --fail --silent --show-error -H 'x-api-key: 123456' \
+              "http://localhost:8080/api/v1/operations/$operation_id" | jq -r '.status')
+            [ "$status" = "SUCCEEDED" ] && break
+            sleep 1
+          done
+          test "$status" = "SUCCEEDED"
+          policy_id=$(curl --fail --silent --show-error -H 'x-api-key: 123456' \
+            'http://localhost:8080/api/v1/policies?limit=100' | \
+            jq -r --arg holder "$holder_id" '.items[] | select(.holder_party_id == $holder) | .id')
+          test -n "$policy_id"
           curl --fail --silent --show-error -H 'x-api-key: 123456' \
-            "http://localhost:8080/api/v1/operations/$operation_id" | jq -e '.status == "PENDING"'
+            "http://localhost:8080/api/v1/policies/$policy_id" | jq -e '.risks | length == 1'
+          conflict_body=$(jq -c '. + {notes:"different payload"}' <<< "$issue_body")
+          conflict_status=$(curl --silent --output /dev/null --show-error --write-out '%{http_code}' \
+            -H 'x-api-key: 123456' -H 'Idempotency-Key: PT-CI-ISSUE-001' \
+            -H 'Content-Type: application/json' -d "$conflict_body" http://localhost:8080/api/v1/policies)
+          test "$conflict_status" = "409"
           curl --fail --silent --show-error -X POST -H 'x-api-key: 123456' \
             -H 'Content-Type: application/json' -d '{"evento":"ACTUALIZACION","polizaId":555}' \
             http://localhost:8080/core-mock/evento

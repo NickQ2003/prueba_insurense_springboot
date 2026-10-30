@@ -10,4 +10,6 @@ public interface DurableOperationRepository {
   OperationSnapshot createIdempotently(OperationDraft draft);
 
   Optional<OperationSnapshot> findById(UUID id);
+
+  OperationSnapshot requestReconciliation(UUID id, String actor);
 }

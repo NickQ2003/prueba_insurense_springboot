@@ -2,6 +2,7 @@ package com.example.policies.entrypoints.coremock;
 
 import org.springframework.boot.actuate.autoconfigure.security.servlet.ManagementWebSecurityAutoConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration;
 import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration;
@@ -18,6 +19,7 @@ import org.springframework.context.annotation.Profile;
       DataSourceAutoConfiguration.class,
       FlywayAutoConfiguration.class,
       HibernateJpaAutoConfiguration.class,
+      RabbitAutoConfiguration.class,
       ManagementWebSecurityAutoConfiguration.class,
       SecurityAutoConfiguration.class,
       UserDetailsServiceAutoConfiguration.class
