@@ -6,6 +6,7 @@ import com.example.policies.domain.model.PolicyPeriod;
 import com.example.policies.domain.model.PolicyStatus;
 import com.example.policies.domain.model.PolicyType;
 import com.example.policies.domain.model.Risk;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -27,6 +28,8 @@ public interface PolicyReadRepository {
   Optional<PolicyPeriod> findCurrentPeriod(UUID policyId);
 
   List<PolicyPeriod> findPeriods(UUID policyId);
+
+  List<PolicyPeriod> findCurrentPeriodsEndingBetween(LocalDate from, LocalDate through);
 
   List<PeriodRiskValue> findPeriodRiskValues(UUID periodId);
 

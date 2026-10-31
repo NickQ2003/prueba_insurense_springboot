@@ -10,6 +10,8 @@ public interface IpcRateRepository {
 
   IpcRate save(IpcRate rate);
 
+  IpcRate saveIfAbsent(IpcRate rate);
+
   Optional<IpcRate> findById(UUID id);
 
   Optional<IpcRate> findLatestApplicable(LocalDate effectiveOn);

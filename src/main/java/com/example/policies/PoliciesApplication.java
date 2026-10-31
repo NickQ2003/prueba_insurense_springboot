@@ -15,7 +15,7 @@ public class PoliciesApplication {
       CoreMockLauncher.run(args);
       return;
     }
-    for (String role : new String[] {"worker", "outbox-relay"}) {
+    for (String role : new String[] {"worker", "outbox-relay", "scheduler", "seed"}) {
       if (Arrays.asList(args).contains("--process-role=" + role)) {
         ProcessRoleLauncher.run(role, args);
         return;

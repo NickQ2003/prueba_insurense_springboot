@@ -12,6 +12,7 @@ import com.example.policies.domain.model.PolicyStatus;
 import com.example.policies.domain.model.PolicyType;
 import com.example.policies.domain.model.Risk;
 import com.example.policies.domain.model.RiskStatus;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -150,6 +151,18 @@ public class JdbcPolicyReadRepository implements PolicyReadRepository {
         "SELECT * FROM policy_periods WHERE policy_id = ? ORDER BY sequence",
         PERIOD_ROW_MAPPER,
         policyId);
+  }
+
+  @Override
+  public List<PolicyPeriod> findCurrentPeriodsEndingBetween(LocalDate from, LocalDate through) {
+    return jdbcTemplate.query(
+        "SELECT pp.* FROM policy_periods pp "
+            + "JOIN policies pol ON pol.id = pp.policy_id "
+            + "WHERE pp.status = 'CURRENT' AND pol.status IN ('ACTIVE', 'RENOVATED') "
+            + "AND pp.ends_on BETWEEN ? AND ? ORDER BY pp.ends_on, pp.policy_id",
+        PERIOD_ROW_MAPPER,
+        from,
+        through);
   }
 
   @Override

@@ -129,6 +129,25 @@ services:
       disable: true
     restart: unless-stopped
 
+  scheduler:
+    image: policies-service:0.1.0
+    command: ["--process-role=scheduler"]
+    init: true
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-policies}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-policies}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-local-only-change-me}
+      RENEWAL_DAYS_AHEAD: ${RENEWAL_DAYS_AHEAD:-30}
+      SCHEDULER_POLL_INTERVAL_MS: ${SCHEDULER_POLL_INTERVAL_MS:-3600000}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
   outbox-relay:
     image: policies-service:0.1.0
     command: ["--process-role=outbox-relay"]
@@ -153,6 +172,22 @@ services:
     healthcheck:
       disable: true
     restart: unless-stopped
+
+  seed:
+    image: policies-service:0.1.0
+    command: ["--process-role=seed"]
+    profiles: ["demo"]
+    init: true
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-policies}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-policies}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-local-only-change-me}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
 
   gateway:
     image: nginx:1.27.4-alpine

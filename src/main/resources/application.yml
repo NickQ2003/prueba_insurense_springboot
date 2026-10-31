@@ -65,3 +65,9 @@ outbox-relay:
 
 worker:
   max-core-concurrency: ${MAX_CORE_CONCURRENCY:2}
+
+renewal:
+  days-ahead: ${RENEWAL_DAYS_AHEAD:30}
+
+scheduler:
+  poll-interval-ms: ${SCHEDULER_POLL_INTERVAL_MS:3600000}

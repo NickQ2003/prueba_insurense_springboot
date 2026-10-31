@@ -48,6 +48,36 @@ public class JdbcIpcRateRepository implements IpcRateRepository {
   }
 
   @Override
+  public IpcRate saveIfAbsent(IpcRate rate) {
+    List<IpcRate> inserted =
+        jdbcTemplate.query(
+            "INSERT INTO ipc_rates "
+                + "(id, reference_period, effective_on, rate, source, is_fictional, created_at) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                + "ON CONFLICT (reference_period) DO NOTHING RETURNING *",
+            IPC_RATE_ROW_MAPPER,
+            rate.id(),
+            rate.referencePeriod(),
+            rate.effectiveOn(),
+            rate.rate().value(),
+            rate.source(),
+            rate.fictional(),
+            Timestamp.from(rate.createdAt()));
+    if (!inserted.isEmpty()) {
+      return inserted.getFirst();
+    }
+    return jdbcTemplate
+        .query(
+            "SELECT * FROM ipc_rates WHERE reference_period = ?",
+            IPC_RATE_ROW_MAPPER,
+            rate.referencePeriod())
+        .stream()
+        .findFirst()
+        .orElseThrow(
+            () -> new IllegalStateException("Seed IPC rate was not found after insert conflict"));
+  }
+
+  @Override
   public Optional<IpcRate> findById(UUID id) {
     return jdbcTemplate
         .query("SELECT * FROM ipc_rates WHERE id = ?", IPC_RATE_ROW_MAPPER, id)

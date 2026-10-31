@@ -10,6 +10,8 @@ public interface PartyRepository {
 
   Party save(Party party);
 
+  Party saveIfAbsent(Party party);
+
   Optional<Party> findById(UUID id);
 
   List<Party> findPage(PartyType partyType, String search, int limit, long offset);

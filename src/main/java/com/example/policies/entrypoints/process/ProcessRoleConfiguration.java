@@ -13,7 +13,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 @Configuration(proxyBeanMethods = false)
-@Profile({"worker", "outbox-relay"})
+@Profile({"worker", "outbox-relay", "scheduler", "seed"})
 @EnableScheduling
 @EnableAutoConfiguration(
     exclude = {
@@ -31,6 +31,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
       "com.example.policies.adapters.out.core",
       "com.example.policies.adapters.out.messaging",
       "com.example.policies.entrypoints.worker",
-      "com.example.policies.entrypoints.outboxrelay"
+      "com.example.policies.entrypoints.outboxrelay",
+      "com.example.policies.entrypoints.scheduler",
+      "com.example.policies.entrypoints.seed"
     })
 public class ProcessRoleConfiguration {}

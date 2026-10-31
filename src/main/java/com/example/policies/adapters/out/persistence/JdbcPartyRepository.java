@@ -44,6 +44,32 @@ public class JdbcPartyRepository implements PartyRepository {
   }
 
   @Override
+  public Party saveIfAbsent(Party party) {
+    List<Party> inserted =
+        jdbcTemplate.query(
+            "INSERT INTO parties (id, party_type, display_name, document_reference, created_at) "
+                + "VALUES (?, ?, ?, ?, ?) ON CONFLICT (document_reference) DO NOTHING RETURNING *",
+            PARTY_ROW_MAPPER,
+            party.id(),
+            party.partyType().name(),
+            party.displayName(),
+            party.documentReference(),
+            Timestamp.from(party.createdAt()));
+    if (!inserted.isEmpty()) {
+      return inserted.getFirst();
+    }
+    return jdbcTemplate
+        .query(
+            "SELECT * FROM parties WHERE document_reference = ?",
+            PARTY_ROW_MAPPER,
+            party.documentReference())
+        .stream()
+        .findFirst()
+        .orElseThrow(
+            () -> new IllegalStateException("Seed party was not found after insert conflict"));
+  }
+
+  @Override
   public Optional<Party> findById(UUID id) {
     return jdbcTemplate.query("SELECT * FROM parties WHERE id = ?", PARTY_ROW_MAPPER, id).stream()
         .findFirst();

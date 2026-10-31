@@ -7,17 +7,24 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.example.policies.adapters.out.persistence.JdbcDurableOperationRepository;
+import com.example.policies.adapters.out.persistence.JdbcIpcRateRepository;
 import com.example.policies.adapters.out.persistence.JdbcOperationProcessingRepository;
 import com.example.policies.adapters.out.persistence.JdbcOutboxRepository;
+import com.example.policies.adapters.out.persistence.JdbcPartyRepository;
+import com.example.policies.adapters.out.persistence.JdbcPolicyReadRepository;
 import com.example.policies.application.error.IdempotencyConflictException;
 import com.example.policies.application.model.CoreOperationResult;
 import com.example.policies.application.model.CoreOperationStatus;
 import com.example.policies.application.port.out.DurableOperationRepository;
+import com.example.policies.application.port.out.IpcRateRepository;
 import com.example.policies.application.port.out.OperationProcessingRepository;
 import com.example.policies.application.port.out.OutboxRepository;
+import com.example.policies.application.port.out.PartyRepository;
+import com.example.policies.application.port.out.PolicyReadRepository;
 import com.example.policies.application.usecase.IssuePolicyCommand;
 import com.example.policies.application.usecase.IssueRiskCommand;
 import com.example.policies.application.usecase.OperationDraft;
+import com.example.policies.application.usecase.OperationService;
 import com.example.policies.application.usecase.OperationSnapshot;
 import com.example.policies.application.usecase.OperationWork;
 import com.example.policies.application.usecase.OutboxEvent;
@@ -30,6 +37,9 @@ import com.example.policies.domain.model.MoneyCurrency;
 import com.example.policies.domain.model.OperationStatus;
 import com.example.policies.domain.model.PartyType;
 import com.example.policies.domain.model.PolicyType;
+import com.example.policies.entrypoints.seed.DemoSeedRunner;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -41,6 +51,7 @@ import java.util.UUID;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.DefaultApplicationArguments;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -65,6 +76,7 @@ class PostgresIntegrationIT {
   private static JdbcTemplate jdbcTemplate;
   private static DurableOperationRepository operationRepository;
   private static OperationProcessingRepository operationProcessingRepository;
+  private static PolicyReadRepository policyReadRepository;
   private static TransactionTemplate transactionTemplate;
 
   @BeforeAll
@@ -77,6 +89,7 @@ class PostgresIntegrationIT {
     jdbcTemplate = new JdbcTemplate(dataSource);
     operationRepository = new JdbcDurableOperationRepository(jdbcTemplate);
     operationProcessingRepository = new JdbcOperationProcessingRepository(jdbcTemplate);
+    policyReadRepository = new JdbcPolicyReadRepository(jdbcTemplate);
     transactionTemplate = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
   }
 
@@ -104,6 +117,57 @@ class PostgresIntegrationIT {
                 String.class));
 
     assertEquals(expectedTables, actualTables);
+  }
+
+  @Test
+  void selectsOnlyActivePoliciesWithCurrentPeriodsInTheRenewalWindow() {
+    PolicyFixture due = createPolicyFixture(1);
+    PolicyFixture cancelled = createPolicyFixture(1);
+    jdbcTemplate.update(
+        "UPDATE policies SET status = 'CANCELLED' WHERE id = ?", cancelled.policyId());
+
+    List<com.example.policies.domain.model.PolicyPeriod> duePeriods =
+        policyReadRepository.findCurrentPeriodsEndingBetween(
+            java.time.LocalDate.parse("2027-10-01"), java.time.LocalDate.parse("2027-10-30"));
+
+    assertTrue(duePeriods.stream().anyMatch(period -> period.id().equals(due.periodId())));
+    assertFalse(duePeriods.stream().anyMatch(period -> period.id().equals(cancelled.periodId())));
+  }
+
+  @Test
+  void demoSeedCanBeRunRepeatedlyWithoutDuplicatingSyntheticFixtures() throws Exception {
+    PartyRepository partyRepository = new JdbcPartyRepository(jdbcTemplate);
+    IpcRateRepository ipcRateRepository = new JdbcIpcRateRepository(jdbcTemplate);
+    OperationService operationService =
+        new OperationService(
+            operationRepository,
+            partyRepository,
+            new ObjectMapper().registerModule(new JavaTimeModule()));
+    DemoSeedRunner seedRunner =
+        new DemoSeedRunner(
+            partyRepository, ipcRateRepository, operationRepository, operationService);
+    DefaultApplicationArguments arguments = new DefaultApplicationArguments();
+
+    seedRunner.run(arguments);
+    seedRunner.run(arguments);
+
+    assertEquals(
+        4,
+        jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM parties WHERE document_reference LIKE 'DEMO-SEED-%'",
+            Integer.class));
+    assertEquals(
+        1,
+        jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM ipc_rates WHERE reference_period = 'DEMO-SEED-IPC'",
+            Integer.class));
+    assertEquals(
+        1,
+        jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM operations "
+                + "WHERE consumer_scope = 'api' AND operation_type = 'ISSUE_POLICY' "
+                + "AND idempotency_key = 'DEMO-SEED-ISSUE-COLLECTIVE-001'",
+            Integer.class));
   }
 
   @Test
