@@ -20,10 +20,12 @@ jobs:
         run: ./mvnw -B -ntp -Pintegration verify
       - name: Validate Compose configuration
         run: docker compose config --quiet
+      - name: Validate isolated E2E configuration
+        run: docker compose -f compose.yaml -f compose.test.yaml --profile test config --quiet
       - name: Build Docker images
         run: docker compose build
       - name: Start Compose services
-        run: docker compose up -d api worker outbox-relay core-mock gateway rabbitmq db
+        run: docker compose up -d api worker scheduler outbox-relay core-mock gateway rabbitmq db
       - name: Wait for gateway health
         run: docker compose up -d --wait --wait-timeout 300 gateway
       - name: Smoke check API
@@ -69,6 +71,23 @@ jobs:
             -H 'Content-Type: application/json' -d '{"evento":"ACTUALIZACION","polizaId":555}' \
             http://localhost:8080/core-mock/evento
           curl --fail http://localhost:8080/v3/api-docs | jq -e '.info.title == "Rental Policy API"'
-      - name: Stop Compose services
-        if: always()
+      - name: Verify demo seed idempotency
+        run: |
+          docker compose --profile demo run --rm seed
+          docker compose --profile demo run --rm seed
+      - name: Stop development Compose stack
         run: docker compose down
+      - name: Run isolated E2E suite
+        env:
+          GATEWAY_PORT: "18080"
+        run: |
+          docker compose -p policies-e2e -f compose.yaml -f compose.test.yaml \
+            --profile test up --build --abort-on-container-exit --exit-code-from tests tests
+      - name: Stop isolated Compose services
+        if: always()
+        env:
+          GATEWAY_PORT: "18080"
+        run: |
+          docker compose -p policies-e2e -f compose.yaml -f compose.test.yaml \
+            --profile test down
+          docker compose down

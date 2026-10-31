@@ -1,0 +1,57 @@
+services:
+  api:
+    environment:
+      CORE_TIMEOUT_SECONDS: ${TEST_CORE_TIMEOUT_SECONDS:-10}
+      DEMO_CORE_OUTCOME: CONFIRM
+      JAVA_TOOL_OPTIONS: "-XX:ActiveProcessorCount=2 -XX:TieredStopAtLevel=1"
+    healthcheck:
+      start_period: 900s
+
+  worker:
+    environment:
+      CORE_TIMEOUT_SECONDS: ${TEST_CORE_TIMEOUT_SECONDS:-10}
+      DEMO_CORE_OUTCOME: CONFIRM
+      JAVA_TOOL_OPTIONS: "-XX:ActiveProcessorCount=2 -XX:TieredStopAtLevel=1"
+
+  outbox-relay:
+    environment:
+      JAVA_TOOL_OPTIONS: "-XX:ActiveProcessorCount=2 -XX:TieredStopAtLevel=1"
+
+  core-mock:
+    environment:
+      JAVA_TOOL_OPTIONS: "-XX:ActiveProcessorCount=2 -XX:TieredStopAtLevel=1"
+    healthcheck:
+      start_period: 900s
+
+  rabbitmq:
+    volumes: !override []
+    healthcheck:
+      timeout: 30s
+      start_period: 300s
+      retries: 20
+
+  tests:
+    image: python:3.13-alpine
+    profiles: ["test"]
+    entrypoint: ["python", "/tests/e2e_smoke.py"]
+    volumes:
+      - ./scripts/e2e_smoke.py:/tests/e2e_smoke.py:ro
+    environment:
+      E2E_BASE_URL: http://gateway:8080
+      API_KEY: ${API_KEY:-123456}
+      E2E_WAIT_SECONDS: ${E2E_WAIT_SECONDS:-600}
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      core-mock:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      worker:
+        condition: service_started
+      outbox-relay:
+        condition: service_started
+      gateway:
+        condition: service_healthy

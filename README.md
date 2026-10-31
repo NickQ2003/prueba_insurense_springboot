@@ -4,7 +4,7 @@ Backend de demostración para gestionar pólizas de arrendamiento individuales y
 
 ## Requisitos
 
-- Docker con Docker Compose v2.
+- Docker con Docker Compose v2.24 o posterior.
 - Para ejecutar las pruebas localmente: Java 21 y Docker en ejecución para las pruebas de integración PostgreSQL. El Maven Wrapper descarga la versión de Maven fijada por el proyecto.
 
 ## Ejecución local
@@ -15,7 +15,7 @@ docker compose up --build -d
 docker compose ps
 ```
 
-La única entrada publicada al host es el gateway Nginx en `http://localhost:8080` (configurable con `GATEWAY_PORT`). PostgreSQL queda privado en la red de Compose. Flyway ejecuta la migración inicial antes de iniciar la API. Verifica el estado de la aplicación con:
+La única entrada publicada al host es el gateway Nginx en `http://localhost:8080` (configurable con `GATEWAY_PORT`). PostgreSQL queda privado en la red de Compose. Flyway ejecuta la migración inicial antes de iniciar la API. El proceso único `scheduler` crea renovaciones durables para periodos que terminan dentro de `RENEWAL_DAYS_AHEAD`; si falta IPC, la operación queda en `WAITING_INPUT`.
 
 ```bash
 curl --fail http://localhost:8080/health/live
@@ -23,6 +23,14 @@ curl --fail http://localhost:8080/health/ready
 ```
 
 Detén los servicios con `docker compose down`. Los datos de PostgreSQL permanecen en el volumen `postgres_data`.
+
+Carga fixtures sintéticas opcionales con:
+
+```bash
+docker compose --profile demo run --rm seed
+```
+
+El seed idempotente crea partes, una tasa IPC ficticia y una solicitud durable de emisión colectiva. La póliza aparece cuando el worker obtiene confirmación del CORE mock.
 
 ## API síncrona
 
@@ -45,7 +53,23 @@ El proceso privado `core-mock` es una simulación local, no una conexión a WebL
 ./mvnw verify
 ./mvnw -Pintegration verify
 docker compose config --quiet
+docker compose -f compose.yaml -f compose.test.yaml --profile test config --quiet
 docker compose build
 ```
 
-Las pruebas de `verify` cubren reglas, cálculos, API y despacho de operaciones del worker; `-Pintegration` prueba persistencia y transiciones contra PostgreSQL real mediante Testcontainers. Ya están implementados la API síncrona, emisión y cambios contractuales durables e idempotentes, riesgos y cancelaciones, renovaciones IPC con snapshot/reanudación, auditoría, notificación simulada, outbox/relay, worker, reconciliación básica y CORE mock. Quedan por implementar scheduler, seed y la suite E2E aislada final. No se implementará UI.
+Ejecuta la suite E2E completa en un proyecto y volumen aislados:
+
+```bash
+docker compose stop
+E2E_PROJECT=policies-e2e-$(date +%s)
+GATEWAY_PORT=18080 docker compose -p "$E2E_PROJECT" \
+  -f compose.yaml -f compose.test.yaml --profile test \
+  up --build --abort-on-container-exit --exit-code-from tests tests
+GATEWAY_PORT=18080 docker compose -p "$E2E_PROJECT" \
+  -f compose.yaml -f compose.test.yaml --profile test down
+docker compose start
+```
+
+`docker compose stop` y `start` conservan el volumen de desarrollo; cada ejecución E2E usa un proyecto y volumen propios.
+
+Las pruebas de `verify` cubren reglas, cálculos, API y despacho de operaciones del worker; `-Pintegration` prueba persistencia y transiciones contra PostgreSQL real mediante Testcontainers. La E2E verifica emisión, idempotencia, alta/cancelación de riesgos, renovación con IPC, pausa/reanudación sin IPC, cancelación de póliza y rutas compatibles españolas a través del gateway. Ya están implementados la API síncrona, emisión y cambios contractuales durables e idempotentes, periodos/valores IPC, scheduler, seed demo, auditoría, notificación simulada, outbox/relay, worker y CORE mock. No se implementará UI.
