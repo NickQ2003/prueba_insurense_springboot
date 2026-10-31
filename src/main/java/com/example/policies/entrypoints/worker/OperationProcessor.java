@@ -9,16 +9,24 @@ import com.example.policies.application.port.out.CorePort;
 import com.example.policies.application.port.out.OperationProcessingRepository;
 import com.example.policies.application.usecase.IssuePolicyCommand;
 import com.example.policies.application.usecase.OperationWork;
+import com.example.policies.application.usecase.PolicyCancellationCommand;
+import com.example.policies.application.usecase.PolicyRenewalCommand;
+import com.example.policies.application.usecase.RiskCancellationCommand;
+import com.example.policies.application.usecase.RiskCreationCommand;
 import com.example.policies.domain.model.OperationStatus;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Optional;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 
 @Service
 @Profile("worker")
 public class OperationProcessor {
+
+  private static final Logger LOGGER = LoggerFactory.getLogger(OperationProcessor.class);
 
   private final OperationProcessingRepository operationRepository;
   private final CorePort corePort;
@@ -66,6 +74,7 @@ public class OperationProcessor {
         operationRepository.markNeedsReview(operation, "CORE_RECONCILIATION_UNAVAILABLE");
       }
     } catch (Exception exception) {
+      LOGGER.error("Operation {} failed during local processing", operation.id(), exception);
       operationRepository.markNeedsReview(operation, "WORKER_PROCESSING_ERROR");
     }
   }
@@ -89,12 +98,33 @@ public class OperationProcessor {
       operationRepository.markRejected(operation, result);
       return;
     }
-    if (!"ISSUE_POLICY".equals(operation.operationType())) {
-      operationRepository.markNeedsReview(operation, "UNSUPPORTED_OPERATION_TYPE");
-      return;
+    switch (operation.operationType()) {
+      case "ISSUE_POLICY" ->
+          operationRepository.completePolicyIssue(
+              operation,
+              objectMapper.readValue(operation.requestedPayload(), IssuePolicyCommand.class),
+              result);
+      case "ADD_RISK" ->
+          operationRepository.completeRiskAddition(
+              operation,
+              objectMapper.readValue(operation.requestedPayload(), RiskCreationCommand.class),
+              result);
+      case "CANCEL_RISK" ->
+          operationRepository.completeRiskCancellation(
+              operation,
+              objectMapper.readValue(operation.requestedPayload(), RiskCancellationCommand.class),
+              result);
+      case "CANCEL_POLICY" ->
+          operationRepository.completePolicyCancellation(
+              operation,
+              objectMapper.readValue(operation.requestedPayload(), PolicyCancellationCommand.class),
+              result);
+      case "RENEW_POLICY" ->
+          operationRepository.completePolicyRenewal(
+              operation,
+              objectMapper.readValue(operation.requestedPayload(), PolicyRenewalCommand.class),
+              result);
+      default -> operationRepository.markNeedsReview(operation, "UNSUPPORTED_OPERATION_TYPE");
     }
-    IssuePolicyCommand command =
-        objectMapper.readValue(operation.requestedPayload(), IssuePolicyCommand.class);
-    operationRepository.completePolicyIssue(operation, command, result);
   }
 }

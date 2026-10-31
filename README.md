@@ -35,6 +35,8 @@ curl -H 'x-api-key: 123456' 'http://localhost:8080/api/v1/policies?limit=50&offs
 
 `POST /api/v1/parties` crea una parte sintética. `POST /api/v1/policies` registra una solicitud de emisión y requiere `Idempotency-Key`; responde `202 Accepted` con una operación consultable en `/api/v1/operations/{id}`. Ese `202` confirma la persistencia de la solicitud, no la emisión contractual en el CORE. El outbox relay la publica a RabbitMQ y el worker actualiza la operación tras consultar al CORE mock.
 
+Las modificaciones contractuales también son durables e idempotentes: `POST /api/v1/policies/{policyId}/risks`, `POST /api/v1/policies/{policyId}/risks/{riskId}/cancellations`, `POST /api/v1/policies/{policyId}/cancellations` y `POST /api/v1/policies/{policyId}/renewals`. Se consultan riesgos y periodos con `GET /api/v1/policies/{policyId}/risks` y `/periods`. Las tasas IPC se administran en `/api/v1/ipc-rates`. Una renovación sin tasa aplicable queda en `WAITING_INPUT` y se reanuda en `POST /api/v1/operations/{operationId}/resume` con `{"ipc_rate_id":"..."}`. Hay rutas compatibles en español para consultar riesgos y solicitar cambios contractuales.
+
 El proceso privado `core-mock` es una simulación local, no una conexión a WebLogic ni al CORE real. Puedes simular respuestas cambiando `DEMO_CORE_OUTCOME` a `CONFIRM`, `REJECT`, `UNAVAILABLE`, `TIMEOUT_BEFORE_APPLY`, `TIMEOUT_AFTER_APPLY` o `MISMATCH`; la identidad de operación se conserva para reconciliar el mismo resultado. `/core-mock/evento` solo registra el tipo de evento de demostración.
 
 ## Desarrollo y pruebas
@@ -46,4 +48,4 @@ docker compose config --quiet
 docker compose build
 ```
 
-Las pruebas de `verify` cubren reglas, cálculos, API y el worker; `-Pintegration` ejecuta las pruebas con PostgreSQL real mediante Testcontainers. Ya están implementados la API síncrona, emisión durable e idempotente, outbox/auditoría, relay con publisher confirms, worker, reconciliación básica y CORE mock. Quedan por implementar renovaciones IPC, administración/cancelación de riesgos y pólizas, scheduler, seed, UI estática y la suite E2E aislada final.
+Las pruebas de `verify` cubren reglas, cálculos, API y despacho de operaciones del worker; `-Pintegration` prueba persistencia y transiciones contra PostgreSQL real mediante Testcontainers. Ya están implementados la API síncrona, emisión y cambios contractuales durables e idempotentes, riesgos y cancelaciones, renovaciones IPC con snapshot/reanudación, auditoría, notificación simulada, outbox/relay, worker, reconciliación básica y CORE mock. Quedan por implementar scheduler, seed y la suite E2E aislada final. No se implementará UI.

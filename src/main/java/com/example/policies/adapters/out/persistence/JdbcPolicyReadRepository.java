@@ -1,13 +1,20 @@
 package com.example.policies.adapters.out.persistence;
 
 import com.example.policies.application.port.out.PolicyReadRepository;
+import com.example.policies.domain.model.IpcRateValue;
+import com.example.policies.domain.model.Money;
+import com.example.policies.domain.model.MoneyCurrency;
+import com.example.policies.domain.model.PeriodRiskValue;
+import com.example.policies.domain.model.PeriodStatus;
 import com.example.policies.domain.model.Policy;
+import com.example.policies.domain.model.PolicyPeriod;
 import com.example.policies.domain.model.PolicyStatus;
 import com.example.policies.domain.model.PolicyType;
 import com.example.policies.domain.model.Risk;
 import com.example.policies.domain.model.RiskStatus;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -39,6 +46,34 @@ public class JdbcPolicyReadRepository implements PolicyReadRepository {
               resultSet.getObject("landlord_party_id", UUID.class),
               RiskStatus.valueOf(resultSet.getString("status")),
               resultSet.getTimestamp("created_at").toInstant());
+
+  private static final RowMapper<PolicyPeriod> PERIOD_ROW_MAPPER =
+      (resultSet, rowNumber) -> {
+        var rateSnapshot = resultSet.getBigDecimal("ipc_rate_snapshot");
+        return new PolicyPeriod(
+            resultSet.getObject("id", UUID.class),
+            resultSet.getObject("policy_id", UUID.class),
+            resultSet.getInt("sequence"),
+            resultSet.getDate("starts_on").toLocalDate(),
+            resultSet.getDate("ends_on").toLocalDate(),
+            resultSet.getInt("duration_months"),
+            PeriodStatus.valueOf(resultSet.getString("status")),
+            resultSet.getObject("origin_period_id", UUID.class),
+            resultSet.getObject("ipc_rate_id", UUID.class),
+            rateSnapshot == null ? null : new IpcRateValue(rateSnapshot),
+            resultSet.getString("calculation_version"),
+            resultSet.getString("core_reference"));
+      };
+
+  private static final RowMapper<PeriodRiskValue> PERIOD_RISK_VALUE_ROW_MAPPER =
+      (resultSet, rowNumber) ->
+          new PeriodRiskValue(
+              resultSet.getObject("id", UUID.class),
+              resultSet.getObject("period_id", UUID.class),
+              resultSet.getObject("risk_id", UUID.class),
+              new Money(resultSet.getBigDecimal("monthly_rent")),
+              new Money(resultSet.getBigDecimal("premium")),
+              MoneyCurrency.valueOf(resultSet.getString("currency").trim()));
 
   private final JdbcTemplate jdbcTemplate;
 
@@ -76,11 +111,62 @@ public class JdbcPolicyReadRepository implements PolicyReadRepository {
   }
 
   @Override
+  public Optional<Policy> lockById(UUID id) {
+    return jdbcTemplate
+        .query("SELECT * FROM policies WHERE id = ? FOR UPDATE", POLICY_ROW_MAPPER, id)
+        .stream()
+        .findFirst();
+  }
+
+  @Override
   public List<Risk> findRisks(UUID policyId) {
     return jdbcTemplate.query(
         "SELECT * FROM risks WHERE policy_id = ? ORDER BY risk_number, id",
         RISK_ROW_MAPPER,
         policyId);
+  }
+
+  @Override
+  public Optional<Risk> findRisk(UUID riskId) {
+    return jdbcTemplate.query("SELECT * FROM risks WHERE id = ?", RISK_ROW_MAPPER, riskId).stream()
+        .findFirst();
+  }
+
+  @Override
+  public Optional<PolicyPeriod> findCurrentPeriod(UUID policyId) {
+    return jdbcTemplate
+        .query(
+            "SELECT * FROM policy_periods WHERE policy_id = ? AND status = 'CURRENT' "
+                + "ORDER BY sequence DESC LIMIT 1",
+            PERIOD_ROW_MAPPER,
+            policyId)
+        .stream()
+        .findFirst();
+  }
+
+  @Override
+  public List<PolicyPeriod> findPeriods(UUID policyId) {
+    return jdbcTemplate.query(
+        "SELECT * FROM policy_periods WHERE policy_id = ? ORDER BY sequence",
+        PERIOD_ROW_MAPPER,
+        policyId);
+  }
+
+  @Override
+  public List<PeriodRiskValue> findPeriodRiskValues(UUID periodId) {
+    return jdbcTemplate.query(
+        "SELECT * FROM period_risk_values WHERE period_id = ? ORDER BY risk_id",
+        PERIOD_RISK_VALUE_ROW_MAPPER,
+        periodId);
+  }
+
+  @Override
+  public int countActiveRisks(UUID policyId) {
+    return Objects.requireNonNull(
+        jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM risks WHERE policy_id = ? AND status = 'ACTIVE'",
+            Integer.class,
+            policyId));
   }
 
   private FilterClause buildFilter(PolicyType policyType, PolicyStatus status) {

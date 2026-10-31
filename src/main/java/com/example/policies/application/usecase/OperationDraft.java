@@ -1,5 +1,6 @@
 package com.example.policies.application.usecase;
 
+import com.example.policies.domain.model.OperationStatus;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -12,4 +13,8 @@ public record OperationDraft(
     String requestedPayload,
     UUID correlationId,
     String actor,
-    Instant createdAt) {}
+    Instant createdAt,
+    OperationStatus initialStatus,
+    UUID policyId,
+    UUID targetPeriodId,
+    String outboxEventType) {}

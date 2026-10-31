@@ -5,6 +5,7 @@ import com.example.policies.application.error.ResourceNotFoundException;
 import com.example.policies.application.port.out.DurableOperationRepository;
 import com.example.policies.application.port.out.PartyRepository;
 import com.example.policies.domain.model.Money;
+import com.example.policies.domain.model.OperationStatus;
 import com.example.policies.domain.service.PolicyRules;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -67,7 +68,11 @@ public class OperationService {
             payload,
             UUID.randomUUID(),
             actor,
-            requestedAt);
+            requestedAt,
+            OperationStatus.PENDING,
+            null,
+            null,
+            "POLICY_ISSUE_REQUESTED");
     return operationRepository.createIdempotently(draft);
   }
 

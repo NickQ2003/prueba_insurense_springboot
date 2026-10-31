@@ -11,6 +11,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.example.policies.adapters.in.rest.ApiExceptionHandler;
 import com.example.policies.adapters.in.rest.security.SecurityConfiguration;
+import com.example.policies.application.usecase.ContractOperationService;
+import com.example.policies.application.usecase.IpcRateService;
 import com.example.policies.application.usecase.IssuePolicyCommand;
 import com.example.policies.application.usecase.OperationService;
 import com.example.policies.application.usecase.OperationSnapshot;
@@ -42,6 +44,8 @@ class RestApiTest {
   @MockitoBean private PartyService partyService;
   @MockitoBean private PolicyQueryService policyQueryService;
   @MockitoBean private OperationService operationService;
+  @MockitoBean private ContractOperationService contractOperationService;
+  @MockitoBean private IpcRateService ipcRateService;
 
   @Test
   void rejectsBusinessRequestsWithoutApiKey() throws Exception {
@@ -210,11 +214,33 @@ class RestApiTest {
         .andExpect(jsonPath("$.id").value(operationId.toString()));
   }
 
+  @Test
+  void operatorCanResumeRenewalWithAnIpcRate() throws Exception {
+    UUID operationId = UUID.randomUUID();
+    UUID ipcRateId = UUID.randomUUID();
+    given(contractOperationService.resumeRenewal(operationId, ipcRateId, "demo-operator"))
+        .willReturn(operation(operationId, "RENEW_POLICY"));
+
+    mockMvc
+        .perform(
+            post("/api/v1/operations/{operationId}/resume", operationId)
+                .header("x-api-key", "123456")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"ipc_rate_id\":\"" + ipcRateId + "\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.id").value(operationId.toString()))
+        .andExpect(jsonPath("$.operation_type").value("RENEW_POLICY"));
+  }
+
   private static OperationSnapshot pendingOperation(UUID operationId) {
+    return operation(operationId, "ISSUE_POLICY");
+  }
+
+  private static OperationSnapshot operation(UUID operationId, String operationType) {
     Instant now = Instant.parse("2026-10-30T00:00:00Z");
     return new OperationSnapshot(
         operationId,
-        "ISSUE_POLICY",
+        operationType,
         "a".repeat(64),
         OperationStatus.PENDING,
         0,

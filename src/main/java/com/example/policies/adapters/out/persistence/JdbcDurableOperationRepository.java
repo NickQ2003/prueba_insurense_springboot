@@ -4,6 +4,7 @@ import com.example.policies.application.error.IdempotencyConflictException;
 import com.example.policies.application.error.OperationConflictException;
 import com.example.policies.application.error.ResourceNotFoundException;
 import com.example.policies.application.port.out.DurableOperationRepository;
+import com.example.policies.application.usecase.OperationDetails;
 import com.example.policies.application.usecase.OperationDraft;
 import com.example.policies.application.usecase.OperationSnapshot;
 import com.example.policies.domain.model.OperationStatus;
@@ -43,9 +44,10 @@ public class JdbcDurableOperationRepository implements DurableOperationRepositor
     List<OperationSnapshot> inserted =
         jdbcTemplate.query(
             "INSERT INTO operations "
-                + "(id, consumer_scope, operation_type, idempotency_key, request_hash, status, "
+                + "(id, consumer_scope, operation_type, idempotency_key, request_hash, policy_id, "
+                + "target_period_id, status, "
                 + "requested_payload, correlation_id, created_at, updated_at) "
-                + "VALUES (?, ?, ?, ?, ?, 'PENDING', ?::jsonb, ?, ?, ?) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?) "
                 + "ON CONFLICT (consumer_scope, operation_type, idempotency_key) DO NOTHING "
                 + "RETURNING id, operation_type, request_hash, status, attempt_count, "
                 + "correlation_id, created_at, updated_at",
@@ -55,6 +57,9 @@ public class JdbcDurableOperationRepository implements DurableOperationRepositor
             draft.operationType(),
             draft.idempotencyKey(),
             draft.requestHash(),
+            draft.policyId(),
+            draft.targetPeriodId(),
+            draft.initialStatus().name(),
             draft.requestedPayload(),
             draft.correlationId(),
             Timestamp.from(draft.createdAt()),
@@ -80,7 +85,9 @@ public class JdbcDurableOperationRepository implements DurableOperationRepositor
       return existing;
     }
 
-    insertOutboxEvent(draft);
+    if (draft.outboxEventType() != null) {
+      insertOutboxEvent(draft);
+    }
     insertAuditEvent(draft);
     return inserted.getFirst();
   }
@@ -95,6 +102,63 @@ public class JdbcDurableOperationRepository implements DurableOperationRepositor
             id)
         .stream()
         .findFirst();
+  }
+
+  @Override
+  public Optional<OperationSnapshot> findByIdempotencyKey(
+      String consumerScope, String operationType, String idempotencyKey) {
+    return jdbcTemplate
+        .query(
+            "SELECT id, operation_type, request_hash, status, attempt_count, "
+                + "correlation_id, created_at, updated_at FROM operations "
+                + "WHERE consumer_scope = ? AND operation_type = ? AND idempotency_key = ?",
+            OPERATION_ROW_MAPPER,
+            consumerScope,
+            operationType,
+            idempotencyKey)
+        .stream()
+        .findFirst();
+  }
+
+  @Override
+  public Optional<OperationDetails> findDetailsById(UUID id) {
+    return jdbcTemplate
+        .query(
+            "SELECT id, operation_type, request_hash, status, attempt_count, correlation_id, "
+                + "created_at, updated_at, policy_id, target_period_id, requested_payload::text AS requested_payload "
+                + "FROM operations WHERE id = ?",
+            (resultSet, rowNumber) ->
+                new OperationDetails(
+                    OPERATION_ROW_MAPPER.mapRow(resultSet, rowNumber),
+                    resultSet.getObject("policy_id", UUID.class),
+                    resultSet.getObject("target_period_id", UUID.class),
+                    resultSet.getString("requested_payload")),
+            id)
+        .stream()
+        .findFirst();
+  }
+
+  @Override
+  public boolean hasInFlightOperation(UUID policyId) {
+    Boolean exists =
+        jdbcTemplate.queryForObject(
+            "SELECT EXISTS (SELECT 1 FROM operations WHERE policy_id = ? "
+                + "AND status IN ('PENDING', 'WAITING_INPUT', 'PROCESSING', 'RECONCILING', 'NEEDS_REVIEW'))",
+            Boolean.class,
+            policyId);
+    return Boolean.TRUE.equals(exists);
+  }
+
+  @Override
+  public boolean hasOtherInFlightOperation(UUID policyId, UUID operationId) {
+    Boolean exists =
+        jdbcTemplate.queryForObject(
+            "SELECT EXISTS (SELECT 1 FROM operations WHERE policy_id = ? AND id <> ? "
+                + "AND status IN ('PENDING', 'WAITING_INPUT', 'PROCESSING', 'RECONCILING', 'NEEDS_REVIEW'))",
+            Boolean.class,
+            policyId,
+            operationId);
+    return Boolean.TRUE.equals(exists);
   }
 
   @Override
@@ -135,6 +199,43 @@ public class JdbcDurableOperationRepository implements DurableOperationRepositor
     return findById(id).orElseThrow(() -> new ResourceNotFoundException("Operation"));
   }
 
+  @Override
+  @Transactional
+  public OperationSnapshot resumeWaitingInput(UUID id, String requestedPayload, String actor) {
+    int updated =
+        jdbcTemplate.update(
+            "UPDATE operations SET status = 'PENDING', requested_payload = ?::jsonb, "
+                + "next_attempt_at = NULL, updated_at = CURRENT_TIMESTAMP "
+                + "WHERE id = ? AND status = 'WAITING_INPUT' AND operation_type = 'RENEW_POLICY'",
+            requestedPayload,
+            id);
+    if (updated != 1) {
+      throw new OperationConflictException("Operation is not waiting for renewal input");
+    }
+    String outboxPayload = "{\"operation_id\":\"" + id + "\",\"operation_type\":\"RENEW_POLICY\"}";
+    jdbcTemplate.update(
+        "INSERT INTO outbox_events "
+            + "(id, operation_id, event_type, payload, available_at, created_at) "
+            + "VALUES (?, ?, 'POLICY_RENEWAL_REQUESTED', ?::jsonb, "
+            + "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+            + "ON CONFLICT (operation_id, event_type) DO UPDATE SET "
+            + "payload = EXCLUDED.payload, available_at = EXCLUDED.available_at, "
+            + "lease_owner = NULL, lease_until = NULL, published_at = NULL",
+        UUID.randomUUID(),
+        id,
+        outboxPayload);
+    jdbcTemplate.update(
+        "INSERT INTO audit_events "
+            + "(id, actor, action, entity_type, entity_id, details, correlation_id, created_at) "
+            + "SELECT ?, ?, 'RENEWAL_RESUMED', 'OPERATION', id, "
+            + "jsonb_build_object('operation_id', id), correlation_id, CURRENT_TIMESTAMP "
+            + "FROM operations WHERE id = ?",
+        UUID.randomUUID(),
+        actor,
+        id);
+    return findById(id).orElseThrow(() -> new ResourceNotFoundException("Operation"));
+  }
+
   private void insertOutboxEvent(OperationDraft draft) {
     String payload =
         "{\"operation_id\":\""
@@ -148,7 +249,7 @@ public class JdbcDurableOperationRepository implements DurableOperationRepositor
             + "VALUES (?, ?, ?, ?::jsonb, ?, ?)",
         UUID.randomUUID(),
         draft.id(),
-        "POLICY_ISSUE_REQUESTED",
+        draft.outboxEventType(),
         payload,
         Timestamp.from(draft.createdAt()),
         Timestamp.from(draft.createdAt()));

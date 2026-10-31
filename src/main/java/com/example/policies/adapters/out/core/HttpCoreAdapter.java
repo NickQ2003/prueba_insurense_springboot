@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
@@ -53,6 +54,8 @@ public class HttpCoreAdapter implements CorePort {
       return result;
     } catch (RestClientResponseException exception) {
       throw new CoreCallException(exception.getStatusCode().value());
+    } catch (ResourceAccessException exception) {
+      throw new CoreCallException(504, exception);
     }
   }
 
@@ -75,6 +78,8 @@ public class HttpCoreAdapter implements CorePort {
         return Optional.empty();
       }
       throw new CoreCallException(exception.getStatusCode().value());
+    } catch (ResourceAccessException exception) {
+      throw new CoreCallException(504, exception);
     }
   }
 }

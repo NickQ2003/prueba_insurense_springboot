@@ -25,8 +25,7 @@ public class OperationMessageListener {
       concurrency = "${worker.max-core-concurrency:2}")
   public void receive(String payload) throws Exception {
     OutboxEnvelope event = objectMapper.readValue(payload, OutboxEnvelope.class);
-    if (event.eventType().equals("POLICY_ISSUE_REQUESTED")
-        || event.eventType().equals("CORE_RECONCILIATION_REQUESTED")) {
+    if (event.eventType().endsWith("_REQUESTED")) {
       operationProcessor.process(event.operationId());
     }
   }

@@ -1,9 +1,13 @@
 package com.example.policies.application.usecase;
 
+import com.example.policies.application.error.ResourceNotFoundException;
 import com.example.policies.application.port.out.PolicyReadRepository;
 import com.example.policies.domain.model.Policy;
+import com.example.policies.domain.model.PolicyPeriod;
 import com.example.policies.domain.model.PolicyStatus;
 import com.example.policies.domain.model.PolicyType;
+import com.example.policies.domain.model.Risk;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -33,5 +37,21 @@ public class PolicyQueryService {
     return policyReadRepository
         .findById(id)
         .map(policy -> new PolicyWithRisks(policy, policyReadRepository.findRisks(id)));
+  }
+
+  @Transactional(readOnly = true)
+  public List<Risk> findRisks(UUID policyId) {
+    if (policyReadRepository.findById(policyId).isEmpty()) {
+      throw new ResourceNotFoundException("Policy");
+    }
+    return policyReadRepository.findRisks(policyId);
+  }
+
+  @Transactional(readOnly = true)
+  public List<PolicyPeriod> findPeriods(UUID policyId) {
+    if (policyReadRepository.findById(policyId).isEmpty()) {
+      throw new ResourceNotFoundException("Policy");
+    }
+    return policyReadRepository.findPeriods(policyId);
   }
 }

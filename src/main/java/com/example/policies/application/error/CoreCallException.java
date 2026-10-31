@@ -5,7 +5,11 @@ public class CoreCallException extends RuntimeException {
   private final int statusCode;
 
   public CoreCallException(int statusCode) {
-    super("CORE mock returned HTTP " + statusCode);
+    this(statusCode, null);
+  }
+
+  public CoreCallException(int statusCode, Throwable cause) {
+    super("CORE call failed with status " + statusCode, cause);
     this.statusCode = statusCode;
   }
 

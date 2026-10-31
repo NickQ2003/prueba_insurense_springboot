@@ -2,6 +2,8 @@ package com.example.policies.adapters.in.rest;
 
 import com.example.policies.adapters.in.rest.dto.IssuePolicyRequest;
 import com.example.policies.adapters.in.rest.dto.OperationResponse;
+import com.example.policies.adapters.in.rest.dto.ResumeRenewalRequest;
+import com.example.policies.application.usecase.ContractOperationService;
 import com.example.policies.application.usecase.IssuePolicyCommand;
 import com.example.policies.application.usecase.IssueRiskCommand;
 import com.example.policies.application.usecase.OperationService;
@@ -29,9 +31,12 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 public class OperationsController {
 
   private final OperationService operationService;
+  private final ContractOperationService contractOperationService;
 
-  public OperationsController(OperationService operationService) {
+  public OperationsController(
+      OperationService operationService, ContractOperationService contractOperationService) {
     this.operationService = operationService;
+    this.contractOperationService = contractOperationService;
   }
 
   @PostMapping("/policies")
@@ -64,6 +69,17 @@ public class OperationsController {
       @PathVariable UUID operationId, Authentication authentication) {
     return OperationResponse.from(
         operationService.reconcile(operationId, authentication.getName()));
+  }
+
+  @PostMapping("/operations/{operationId}/resume")
+  @PreAuthorize("hasRole('OPERATOR')")
+  public OperationResponse resumeRenewal(
+      @PathVariable UUID operationId,
+      @Valid @RequestBody ResumeRenewalRequest request,
+      Authentication authentication) {
+    return OperationResponse.from(
+        contractOperationService.resumeRenewal(
+            operationId, request.ipcRateId(), authentication.getName()));
   }
 
   private IssuePolicyCommand toCommand(IssuePolicyRequest request) {
